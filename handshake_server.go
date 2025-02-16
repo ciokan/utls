@@ -969,7 +969,7 @@ func clientHelloInfo(ctx context.Context, c *Conn, clientHello *clientHelloMsg) 
 	}
 
 	return &ClientHelloInfo{
-		Raw:               clientHello.oroginal,
+		Raw:               clientHello.original,
 		CipherSuites:      clientHello.cipherSuites,
 		ServerName:        clientHello.serverName,
 		SupportedCurves:   clientHello.supportedCurves,
