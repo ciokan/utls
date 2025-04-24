@@ -7,14 +7,12 @@ package tls
 import (
 	"crypto"
 	"crypto/ecdh"
+	"crypto/mlkem"
 	"crypto/x509"
-	"fmt"
 	"hash"
 	"time"
 
 	"github.com/cloudflare/circl/kem"
-	"github.com/cloudflare/circl/kem/hybrid"
-	"github.com/refraction-networking/utls/internal/mlkem768"
 )
 
 // ClientHandshakeState includes both TLS 1.3-only and TLS 1.2-only states,
@@ -43,9 +41,13 @@ type PubClientHandshakeState struct {
 type TLS13OnlyState struct {
 	// Deprecated: Use KeyShareKeys instead. KeyShareKeys will take precedence if both are set.
 	// Support may be removed in the future.
-	EcdheKey        *ecdh.PrivateKey
+	EcdheKey *ecdh.PrivateKey
+	// Deprecated: Use KeyShareKeys instead. This variable is no longer used.
+	// Will be removed in the future.
 	KeySharesParams *KeySharesParameters
-	KEMKey          *KemPrivateKey
+	// Deprecated: Use KeyShareKeys instead. This variable is no longer used.
+	// Will be removed in the future.
+	KEMKey *KemPrivateKey
 
 	KeyShareKeys  *KeySharePrivateKeys
 	Suite         *PubCipherSuiteTLS13
@@ -64,44 +66,9 @@ type TLS12OnlyState struct {
 	Suite        PubCipherSuite
 }
 
-func mlkemCirclToGo(circlKey kem.PrivateKey) (*mlkem768.DecapsulationKey, *ecdh.PrivateKey, error) {
-	if circlKey.Scheme().Name() != "Kyber768-X25519" {
-		return nil, nil, fmt.Errorf("circl key is not Kyber768-X25519")
-	}
-
-	encodedKey, err := circlKey.MarshalBinary()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	ecdhKey := encodedKey[:x25519PublicKeySize]
-	kyberKey := encodedKey[x25519PublicKeySize:]
-
-	goKyberkey, err := mlkem768.NewKeyFromExtendedEncoding(kyberKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	goEcdhKey, err := ecdh.X25519().NewPrivateKey(ecdhKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return goKyberkey, goEcdhKey, nil
-}
-
 func (chs *TLS13OnlyState) private13KeyShareKeys() *keySharePrivateKeys {
 	if chs.KeyShareKeys != nil {
 		return chs.KeyShareKeys.ToPrivate()
-	}
-
-	if chs.KEMKey != nil {
-		if kyberKey, ecdhKey, err := mlkemCirclToGo(chs.KEMKey.SecretKey); err == nil {
-			return &keySharePrivateKeys{
-				kyber: kyberKey,
-				ecdhe: ecdhKey,
-			}
-		}
 	}
 
 	if chs.EcdheKey != nil {
@@ -113,31 +80,28 @@ func (chs *TLS13OnlyState) private13KeyShareKeys() *keySharePrivateKeys {
 	return nil
 }
 
-func kyberGoToCircl(kyberKey *mlkem768.DecapsulationKey, ecdhKey *ecdh.PrivateKey) (kem.PrivateKey, error) {
-	return hybrid.Kyber768X25519().UnmarshalBinaryPrivateKey(append(ecdhKey.Bytes(), kyberKey.Bytes()...))
-}
+// func kyberGoToCircl(kyberKey *mlkem768.DecapsulationKey, ecdhKey *ecdh.PrivateKey) (kem.PrivateKey, error) {
+// 	return hybrid.Kyber768X25519().UnmarshalBinaryPrivateKey(append(ecdhKey.Bytes(), kyberKey.Bytes()...))
+// }
 
 func (chs *PubClientHandshakeState) toPrivate13() *clientHandshakeStateTLS13 {
 	if chs == nil {
 		return nil
 	} else {
 		return &clientHandshakeStateTLS13{
-			c:               chs.C,
-			serverHello:     chs.ServerHello.getPrivatePtr(),
-			hello:           chs.Hello.getPrivatePtr(),
-			keyShareKeys:    chs.State13.private13KeyShareKeys(),
-			keySharesParams: chs.State13.KeySharesParams,
+			c:            chs.C,
+			serverHello:  chs.ServerHello.getPrivatePtr(),
+			hello:        chs.Hello.getPrivatePtr(),
+			keyShareKeys: chs.State13.private13KeyShareKeys(),
 
-			session:     chs.Session,
-			earlySecret: chs.State13.EarlySecret,
-			binderKey:   chs.State13.BinderKey,
+			session:   chs.Session,
+			binderKey: chs.State13.BinderKey,
 
 			certReq:       chs.State13.CertReq.toPrivate(),
 			usingPSK:      chs.State13.UsingPSK,
 			sentDummyCCS:  chs.State13.SentDummyCCS,
 			suite:         chs.State13.Suite.toPrivate(),
 			transcript:    chs.State13.Transcript,
-			masterSecret:  chs.MasterSecret,
 			trafficSecret: chs.State13.TrafficSecret,
 
 			uconn: chs.uconn,
@@ -150,16 +114,15 @@ func (chs13 *clientHandshakeStateTLS13) toPublic13() *PubClientHandshakeState {
 		return nil
 	} else {
 		tls13State := TLS13OnlyState{
-			KeySharesParams: chs13.keySharesParams,
-			KeyShareKeys:    chs13.keyShareKeys.ToPublic(),
-			EarlySecret:     chs13.earlySecret,
-			BinderKey:       chs13.binderKey,
-			CertReq:         chs13.certReq.toPublic(),
-			UsingPSK:        chs13.usingPSK,
-			SentDummyCCS:    chs13.sentDummyCCS,
-			Suite:           chs13.suite.toPublic(),
-			TrafficSecret:   chs13.trafficSecret,
-			Transcript:      chs13.transcript,
+			KeyShareKeys:  chs13.keyShareKeys.ToPublic(),
+			EarlySecret:   chs13.earlySecret.Secret(),
+			BinderKey:     chs13.binderKey,
+			CertReq:       chs13.certReq.toPublic(),
+			UsingPSK:      chs13.usingPSK,
+			SentDummyCCS:  chs13.sentDummyCCS,
+			Suite:         chs13.suite.toPublic(),
+			TrafficSecret: chs13.trafficSecret,
+			Transcript:    chs13.transcript,
 		}
 		return &PubClientHandshakeState{
 			C:           chs13.c,
@@ -168,7 +131,7 @@ func (chs13 *clientHandshakeStateTLS13) toPublic13() *PubClientHandshakeState {
 
 			Session: chs13.session,
 
-			MasterSecret: chs13.masterSecret,
+			MasterSecret: chs13.masterSecret.Secret(),
 
 			State13: tls13State,
 
@@ -599,22 +562,48 @@ type FinishedHash struct {
 	Buffer []byte
 
 	Version uint16
-	Prf     func(result, secret, label, seed []byte)
+	Prfv2   prfFunc
+
+	// Deprecated: Use Prfv2 instead. Prfv2 will be used if both are set.
+	Prf prfFuncOld
+}
+
+type prfFuncOld func(result, secret, label, seed []byte)
+
+func prfFuncV1ToV2(v1 prfFuncOld) prfFunc {
+	return func(secret []byte, label string, seed []byte, keyLen int) []byte {
+		res := make([]byte, keyLen)
+		v1(res, secret, []byte(label), seed)
+		return res
+	}
+}
+
+func prfFuncV2ToV1(v2 prfFunc) prfFuncOld {
+	return func(result, secret, label, seed []byte) {
+		copy(result, v2(secret, string(label), seed, len(result)))
+	}
 }
 
 func (fh *FinishedHash) getPrivateObj() finishedHash {
 	if fh == nil {
 		return finishedHash{}
 	} else {
-		return finishedHash{
+		res := finishedHash{
 			client:    fh.Client,
 			server:    fh.Server,
 			clientMD5: fh.ClientMD5,
 			serverMD5: fh.ServerMD5,
 			buffer:    fh.Buffer,
 			version:   fh.Version,
-			prf:       fh.Prf,
 		}
+
+		if fh.Prfv2 != nil {
+			res.prf = fh.Prfv2
+		} else if fh.Prf != nil {
+			res.prf = prfFuncV1ToV2(fh.Prf)
+		}
+
+		return res
 	}
 }
 
@@ -622,14 +611,19 @@ func (fh *finishedHash) getPublicObj() FinishedHash {
 	if fh == nil {
 		return FinishedHash{}
 	} else {
-		return FinishedHash{
+		res := FinishedHash{
 			Client:    fh.client,
 			Server:    fh.server,
 			ClientMD5: fh.clientMD5,
 			ServerMD5: fh.serverMD5,
 			Buffer:    fh.buffer,
 			Version:   fh.version,
-			Prf:       fh.prf}
+		}
+
+		res.Prfv2 = fh.prf
+		res.Prf = prfFuncV2ToV1(fh.prf)
+
+		return res
 	}
 }
 
@@ -864,6 +858,8 @@ type kemPrivateKey struct {
 	curveID   CurveID
 }
 
+// Deprecated: Use KeySharePrivateKeys instead. This type is no longer used.
+// Will be removed in the future.
 type KemPrivateKey struct {
 	SecretKey kem.PrivateKey
 	CurveID   CurveID
@@ -894,21 +890,27 @@ func (kpk *kemPrivateKey) ToPublic() *KemPrivateKey {
 type KeySharePrivateKeys struct {
 	CurveID CurveID
 	Ecdhe   *ecdh.PrivateKey
-	kyber   *mlkem768.DecapsulationKey
+	mlkem   *mlkem.DecapsulationKey768
 }
 
 func (ksp *KeySharePrivateKeys) ToPrivate() *keySharePrivateKeys {
+	if ksp == nil {
+		return nil
+	}
 	return &keySharePrivateKeys{
 		curveID: ksp.CurveID,
 		ecdhe:   ksp.Ecdhe,
-		kyber:   ksp.kyber,
+		mlkem:   ksp.mlkem,
 	}
 }
 
 func (ksp *keySharePrivateKeys) ToPublic() *KeySharePrivateKeys {
+	if ksp == nil {
+		return nil
+	}
 	return &KeySharePrivateKeys{
 		CurveID: ksp.curveID,
 		Ecdhe:   ksp.ecdhe,
-		kyber:   ksp.kyber,
+		mlkem:   ksp.mlkem,
 	}
 }
