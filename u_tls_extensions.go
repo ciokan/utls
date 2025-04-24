@@ -686,7 +686,7 @@ func (e *ALPNExtension) Write(b []byte) (int, error) {
 // At the time of this writing, this extension is currently a draft:
 // https://datatracker.ietf.org/doc/html/draft-vvv-tls-alps-01
 type ApplicationSettingsExtension struct {
-	*utls.ApplicationSettingsExtension
+	SupportedProtocols []string
 }
 
 func (e *ApplicationSettingsExtension) Len() int {
