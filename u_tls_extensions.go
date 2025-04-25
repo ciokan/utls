@@ -689,6 +689,10 @@ type ApplicationSettingsExtension struct {
 	SupportedProtocols []string
 }
 
+func (e *ApplicationSettingsExtension) writeToUConn(uc *UConn) error {
+	return nil
+}
+
 func (e *ApplicationSettingsExtension) Len() int {
 	bLen := 2 + 2 + 2 // Type + Length + ALPS Extension length
 	for _, s := range e.SupportedProtocols {
@@ -703,8 +707,8 @@ func (e *ApplicationSettingsExtension) Read(b []byte) (int, error) {
 	}
 
 	// Read Type.
-	b[0] = byte(17613 >> 8)   // hex: 44 dec: 68
-	b[1] = byte(17613 & 0xff) // hex: 69 dec: 105
+	b[0] = byte(utlsExtensionApplicationSettings >> 8)   // hex: 44 dec: 68
+	b[1] = byte(utlsExtensionApplicationSettings & 0xff) // hex: 69 dec: 105
 
 	lengths := b[2:] // get the remaining buffer without Type
 	b = b[6:]        // set the buffer to the buffer without Type, Length and ALPS Extension Length (so only the Supported ALPN list remains)
@@ -729,7 +733,7 @@ func (e *ApplicationSettingsExtension) Read(b []byte) (int, error) {
 
 func (e *ApplicationSettingsExtension) UnmarshalJSON(b []byte) error {
 	var applicationSettingsSupport struct {
-		SupportedProtocols []string `json:"supported_protocols_new"`
+		SupportedProtocols []string `json:"supported_protocols"`
 	}
 
 	if err := json.Unmarshal(b, &applicationSettingsSupport); err != nil {
@@ -760,10 +764,6 @@ func (e *ApplicationSettingsExtension) Write(b []byte) (int, error) {
 	}
 	e.SupportedProtocols = alpnProtocols
 	return fullLen, nil
-}
-
-func (e *ApplicationSettingsExtension) writeToUConn(uc *UConn) error {
-	return nil
 }
 
 // SCTExtension implements signed_certificate_timestamp (18)
